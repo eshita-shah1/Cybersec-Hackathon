@@ -1,0 +1,75 @@
+# D3COY full-stack deployment: sandbox executor + gateway + frontend.
+#
+#   1. copy .env.deploy.example -> .env  and fill in the secrets
+#   2. docker compose up --build
+#   3. open http://localhost:8080   (gateway API on :8000, executor on :8100)
+#
+# The gateway and executor share PERMISSION_SIGNING_KEY. The browser talks only to the gateway.
+
+services:
+  executor:
+    build: ./d3coy-backend
+    command: uvicorn sandbox_executor.main:app --host 0.0.0.0 --port 8100
+    environment:
+      PERMISSION_SIGNING_KEY: ${PERMISSION_SIGNING_KEY:?set PERMISSION_SIGNING_KEY in .env}
+      SANDBOX_DATABASE_URL: sqlite:////data/sandbox.db
+    volumes:
+      - executor-data:/data
+    ports:
+      - "8100:8100"   # exposed for the dashboard's sandbox-state view; not required by the browser
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    build: ./d3coy-backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      executor:
+        condition: service_healthy
+    environment:
+      PERMISSION_SIGNING_KEY: ${PERMISSION_SIGNING_KEY:?set PERMISSION_SIGNING_KEY in .env}
+      # Leave ADMIN_API_KEY blank to run in OPEN MODE (no admin login needed — anyone can run
+      # scenarios, reviews and the live agent). Set it to require the key again.
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      AGENT_AUTH_REQUIRED: "true"
+      DATABASE_URL: sqlite:////data/d3coy.db
+      ARTIFACTS_DIR: /app/artifacts
+      AUTO_TRAIN_BASELINE: "true"
+      EXECUTOR_URL: http://executor:8100
+      SELF_BASE_URL: http://localhost:8000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      # Optional LLM for the live agent demo (leave blank to disable that feature):
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      D3COY_AGENT_PROVIDER: ${D3COY_AGENT_PROVIDER:-}
+      D3COY_AGENT_MODEL: ${D3COY_AGENT_MODEL:-}
+    volumes:
+      - gateway-data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Browser-facing gateway URL (baked into the static bundle at build time).
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      - gateway
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  gateway-data:
+  executor-data:

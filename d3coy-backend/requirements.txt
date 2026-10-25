@@ -1,0 +1,31 @@
+# D3COY backend — tested with Python 3.14.3 on Windows 11 (Python 3.12+ expected to work).
+#
+# PyTorch (needed by sentence-transformers) is large. For a CPU-only install, run this FIRST:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# then: pip install -r requirements.txt
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+SQLAlchemy==2.1.6
+numpy==2.5.4
+pandas==3.1.0
+scikit-learn==1.9.1
+joblib==1.6.0
+river==0.26.1
+sentence-transformers==6.2.0
+torch>=2.4
+python-dotenv==1.2.4
+
+# real agent integration (LangGraph agent; LLM provider is pluggable)
+langgraph==1.2.17
+langchain-core==1.7.0
+# pick one provider (or both). Gemini has a free tier (Google AI Studio):
+langchain-google-genai==4.4.2
+# Claude (optional alternative):
+langchain-anthropic==1.7.6
+
+# testing
+pytest==9.1.1
+httpx==0.28.1

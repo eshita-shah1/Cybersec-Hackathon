@@ -1,0 +1,45 @@
+# ─── Secrets (NEVER commit) ───────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.deploy.example
+*.key
+*.pem
+
+# ─── Python ───────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── Node / frontend build ────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+dist/
+*.local
+
+# ─── Runtime data / databases ─────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+d3coy-backend/data/*.db
+data/*.db
+
+# ─── Large archives / build outputs (GitHub rejects >100MB) ───────────────
+*.zip
+*.tar
+*.tar.gz
+
+# ─── Editor / OS ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ─── Caddy local validation cruft ─────────────────────────────────────────
+Caddyfile;C*/

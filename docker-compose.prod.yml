@@ -1,0 +1,102 @@
+# D3COY PUBLIC (server) deployment — one HTTPS origin, automatic TLS via Caddy.
+#
+#   Browser ──▶ https://<your>.duckdns.org   (Caddy, ports 80/443)
+#                 ├── /api/*  /ws/*  /docs   ──▶ gateway:8000
+#                 └── everything else (the SPA) ──▶ frontend:80
+#
+# Because the UI and the API share ONE origin, the browser calls the API same-origin:
+# no CORS to fight, and the live feed uses wss:// for free.
+#
+# Only Caddy publishes host ports. The gateway, executor and frontend are reachable
+# ONLY on the internal docker network. In your cloud firewall open ONLY 22, 80 and 443.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Requires in .env:  PERMISSION_SIGNING_KEY, PUBLIC_HOST, PUBLIC_URL
+# Strongly recommended for a public URL:  ADMIN_API_KEY (a strong value)
+# Optional (live agent):  GEMINI_API_KEY, D3COY_AGENT_PROVIDER, D3COY_AGENT_MODEL
+
+services:
+  executor:
+    build: ./d3coy-backend
+    command: uvicorn sandbox_executor.main:app --host 0.0.0.0 --port 8100
+    environment:
+      PERMISSION_SIGNING_KEY: ${PERMISSION_SIGNING_KEY:?set PERMISSION_SIGNING_KEY in .env}
+      SANDBOX_DATABASE_URL: sqlite:////data/sandbox.db
+    volumes:
+      - executor-data:/data
+    expose:
+      - "8100"   # internal only — never published to the host
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    build: ./d3coy-backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      executor:
+        condition: service_healthy
+    environment:
+      PERMISSION_SIGNING_KEY: ${PERMISSION_SIGNING_KEY:?set PERMISSION_SIGNING_KEY in .env}
+      # Leave ADMIN_API_KEY blank for open mode (anyone can run everything) or set a strong
+      # value to require the key. For a PUBLIC url a strong key is strongly recommended.
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      AGENT_AUTH_REQUIRED: "true"
+      DATABASE_URL: sqlite:////data/d3coy.db
+      ARTIFACTS_DIR: /app/artifacts
+      AUTO_TRAIN_BASELINE: "true"
+      EXECUTOR_URL: http://executor:8100
+      SELF_BASE_URL: http://localhost:8000   # the in-process agent calls the gateway in its own container
+      CORS_ORIGINS: ${PUBLIC_URL:?set PUBLIC_URL in .env, e.g. https://d3coy-demo.duckdns.org}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      D3COY_AGENT_PROVIDER: ${D3COY_AGENT_PROVIDER:-}
+      D3COY_AGENT_MODEL: ${D3COY_AGENT_MODEL:-}
+    volumes:
+      - gateway-data:/data
+    expose:
+      - "8000"   # internal only
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Same host as the page itself → the browser calls the API same-origin.
+        VITE_API_BASE_URL: ${PUBLIC_URL:?set PUBLIC_URL in .env, e.g. https://d3coy-demo.duckdns.org}
+    depends_on:
+      - gateway
+    expose:
+      - "80"   # internal only — Caddy serves it to the world
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      - gateway
+      - frontend
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST in .env, e.g. d3coy-demo.duckdns.org}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # persists the Let's Encrypt certificate across restarts
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  gateway-data:
+  executor-data:
+  caddy-data:
+  caddy-config:

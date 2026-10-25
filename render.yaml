@@ -1,0 +1,181 @@
+# D3COY — Render Blueprint
+#
+# Three services in deployment order (Render resolves cross-references):
+#   d3coy-executor   (private service)  — sandbox tool executor, no public internet access
+#   d3coy-gateway    (web service)      — FastAPI security gateway, public
+#   d3coy-frontend   (static site)      — React/Vite dashboard, served from CDN
+#
+# All services MUST be in the same region for the private network to work.
+#
+# ┌─ SECRETS ────────────────────────────────────────────────────────────────┐
+# │  Set these in the Render Dashboard when prompted (sync: false).          │
+# │  Never commit real values to this file.                                  │
+# │                                                                          │
+# │  ADMIN_API_KEY          — gateway admin auth key                         │
+# │  PERMISSION_SIGNING_KEY — HMAC key; must be identical for both services  │
+# │  GEMINI_API_KEY         — optional; enables the live LLM agent demo      │
+# └──────────────────────────────────────────────────────────────────────────┘
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SERVICE 1 — Sandbox executor (private service)
+  #
+  # Not internet-reachable. Only the gateway can call it over the private
+  # network. Render assigns $PORT automatically; uvicorn binds to it.
+  #
+  # Persistent disk at /opt/executor-data stores sandbox.db so customer-row
+  # state survives redeployments.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - type: pserv
+    name: d3coy-executor
+    runtime: python
+    region: oregon
+    plan: 0.5c-512mb
+    rootDir: d3coy-backend
+    buildCommand: >-
+      pip install torch --index-url https://download.pytorch.org/whl/cpu &&
+      pip install -r requirements.txt
+    startCommand: uvicorn sandbox_executor.main:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: executor-data
+      mountPath: /opt/executor-data
+      sizeGB: 1
+    envVars:
+      # Sandbox SQLite database — on the persistent disk
+      - key: SANDBOX_DATABASE_URL
+        value: sqlite:////opt/executor-data/sandbox.db
+      # Shared HMAC key — Render prompts for this value at first deploy
+      - key: PERMISSION_SIGNING_KEY
+        sync: false
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SERVICE 2 — D3COY gateway (public web service)
+  #
+  # Render assigns $PORT; start_gateway.sh builds EXECUTOR_URL from the
+  # private hostport and then starts uvicorn.
+  #
+  # Persistent disk at /opt/gateway-data stores:
+  #   /opt/gateway-data/d3coy.db           — main SQLite database
+  #   /opt/gateway-data/artifacts/          — trained ML model files
+  #   (HuggingFace cache uses the default ~/.cache path on the same disk
+  #    when HOME=/opt/gateway-data is set — see HOME env var below)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - type: web
+    name: d3coy-gateway
+    runtime: python
+    region: oregon
+    plan: 1c-2g
+    rootDir: d3coy-backend
+    buildCommand: >-
+      pip install torch --index-url https://download.pytorch.org/whl/cpu &&
+      pip install -r requirements.txt
+    # start_gateway.sh builds EXECUTOR_URL from EXECUTOR_HOSTPORT and sets
+    # SELF_BASE_URL from RENDER_EXTERNAL_URL before starting uvicorn.
+    startCommand: bash start_gateway.sh
+    healthCheckPath: /health
+    disk:
+      name: gateway-data
+      mountPath: /opt/gateway-data
+      sizeGB: 5
+    envVars:
+      # ── Application ────────────────────────────────────────────────────────
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+
+      # ── Main SQLite database (on the persistent disk) ──────────────────────
+      - key: DATABASE_URL
+        value: sqlite:////opt/gateway-data/d3coy.db
+
+      # ── ML model artifacts (on the persistent disk) ────────────────────────
+      - key: ARTIFACTS_DIR
+        value: /opt/gateway-data/artifacts
+
+      # ── HuggingFace model cache (on the persistent disk) ──────────────────
+      # Sentence Transformer (~90 MB) is downloaded once and cached.
+      # Setting HOME redirects ~/.cache/huggingface to the persistent disk.
+      - key: HOME
+        value: /opt/gateway-data
+
+      # ── Executor private-network address ───────────────────────────────────
+      # Render injects the executor's internal host:port (e.g. "d3coy-executor:10000").
+      # start_gateway.sh prepends http:// to build the full EXECUTOR_URL.
+      - key: EXECUTOR_HOSTPORT
+        fromService:
+          name: d3coy-executor
+          type: pserv
+          property: hostport
+
+      # ── CORS — allow the deployed frontend ─────────────────────────────────
+      # RENDER_EXTERNAL_URL for the frontend is its full https:// URL.
+      - key: CORS_ORIGINS
+        fromService:
+          name: d3coy-frontend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+
+      # ── Executor timeout (increase slightly for cloud latency) ─────────────
+      - key: EXECUTOR_TIMEOUT_SECONDS
+        value: "15"
+
+      # ── Secrets (Render prompts at first deploy; not stored in this file) ──
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: PERMISSION_SIGNING_KEY
+        sync: false
+      # Optional — enables the Live Agent Demo button in the dashboard
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # ── Security ───────────────────────────────────────────────────────────
+      - key: AGENT_AUTH_REQUIRED
+        value: "true"
+      - key: SEED_ON_STARTUP
+        value: "true"
+
+      # ── Behavioral ML model — auto-train on first start if missing ─────────
+      - key: AUTO_TRAIN_BASELINE
+        value: "true"
+
+      # ── Semantic intent validation ─────────────────────────────────────────
+      - key: SEMANTIC_ENABLED
+        value: "true"
+      - key: SEMANTIC_MODEL_NAME
+        value: sentence-transformers/all-MiniLM-L6-v2
+      # Allow download on first cold start (cached to /opt/gateway-data/.cache)
+      - key: SEMANTIC_ALLOW_DOWNLOAD
+        value: "true"
+
+      # ── Live agent demo ────────────────────────────────────────────────────
+      - key: AGENT_DEMO_ENABLED
+        value: "true"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SERVICE 3 — React/Vite frontend (static site)
+  #
+  # Served from Render's global CDN. No server-side runtime.
+  # VITE_API_BASE_URL is injected at BUILD TIME so the compiled JS bundle
+  # points to the deployed gateway. The WebSocket URL is derived automatically
+  # (https → wss) by frontend/src/services/apiClient.js — no extra config.
+  #
+  # SPA routing: all paths rewrite to index.html.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - type: web
+    name: d3coy-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Full https:// URL of the gateway, injected at build time
+      - key: VITE_API_BASE_URL
+        fromService:
+          name: d3coy-gateway
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

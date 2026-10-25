@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.hf/
+# keep artifacts/ (the trained baseline is baked into the image)

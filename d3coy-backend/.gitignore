@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/sandbox.db*
+data/synthetic/
+*.db
+artifacts/*.joblib
+artifacts/*.pkl
+artifacts/*.tmp
+artifacts/baseline_report.json
+!data/.gitkeep
+!artifacts/.gitkeep
