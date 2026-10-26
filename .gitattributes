@@ -1,0 +1,5 @@
+# Shell scripts must stay LF — they run on Linux (Render / Docker). CRLF breaks bash.
+*.sh text eol=lf
+
+# Let git handle normal line endings for the rest.
+* text=auto

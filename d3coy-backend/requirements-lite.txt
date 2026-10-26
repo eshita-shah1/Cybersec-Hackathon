@@ -1,0 +1,27 @@
+# D3COY backend — LITE requirements for Render's FREE tier (512 MB).
+#
+# Deliberately OMITS torch + sentence-transformers (~1.5 GB RAM, too big for free tier).
+# With them absent, the semantic detector's deferred import fails and the app falls back to
+# the lexical (token-overlap) backend when SEMANTIC_ENABLED=true and SEMANTIC_FALLBACK=lexical.
+# All four detection layers still run; the semantic one is lexical instead of transformer-based.
+#
+# For the full transformer-based semantic layer, use requirements.txt (needs ~2 GB RAM).
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+SQLAlchemy==2.1.6
+numpy==2.5.4
+pandas==3.1.0
+scikit-learn==1.9.1
+joblib==1.6.0
+river==0.26.1
+python-dotenv==1.2.4
+httpx==0.28.1
+
+# real agent integration (LangGraph agent; no torch needed)
+langgraph==1.2.17
+langchain-core==1.7.0
+langchain-google-genai==4.4.2
+langchain-anthropic==1.7.6
